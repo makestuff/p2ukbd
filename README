@@ -1,0 +1,44 @@
+NeroJTAG is yet another protocol for a USB JTAG adaptor. On the host side there is a simple library
+"libnero", and a patch for Zoltán Csizmadia's excellent xilprg (programmer for Xilinx FPGAs), and a
+simple XSVF player. You can get the host stuff by downloading the Neopurgo package from here:
+
+    https://github.com/makestuff/neopurgo
+
+On the device side, there are two implementations of the NeroJTAG protocol, one for the Cypress FX2
+chip (included in the Neopurgo package above) and one for the Atmel USB AVRs, included here. The
+firmware currently targets the AT90USB162. Change the Makefile if you have a different MCU.
+Suitable hardware platforms include the Nanduino, Teensy, Benito etc etc.
+
+The project build assumes this directory ("neroJtag") lives within a structure like this:
+
+src
+|
++-apps
+| |
+| +-neroJtag
+|
++-libs
+|
++-3rd
+
+*** BUILDING ON WINDOWS ***
+
+Prerequisites:
+   * http://winavr.sourceforge.net/
+   * http://www.atmel.com/dyn/resources/prod_documents/flip-2_4_6.zip
+   * http://www.java.com (FLIP needs this)
+
+make clean
+make
+make -C avr flip
+
+*** BUILDING ON LINUX ***
+
+Prerequisites:
+   * sudo apt-get install gcc-avr
+   * sudo apt-get install avr-libc
+   * sudo apt-get install dfu-programmer
+
+make clean
+make
+sudo make -C avr dfu

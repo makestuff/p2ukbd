@@ -36,6 +36,10 @@
  */
 
 #include "Keyboard.h"
+#include <usart.h>
+#include <avr/interrupt.h>
+#include <avr/pgmspace.h>
+#include <util/delay.h>
 
 /** Indicates what report mode the host has requested, true for normal HID reporting mode, false for special boot
  *  protocol reporting mode.
@@ -54,12 +58,747 @@ static uint16_t IdleCount = 500;
 static uint16_t IdleMSRemaining = 0;
 
 
-/** Main program entry point. This routine configures the hardware required by the application, then
- *  enters a loop to run the application tasks in sequence.
- */
-int main(void)
-{
+#define RELEASE (1<<0)
+#define EXTENDED (1<<1)
+#define CHANGED (1<<2)
+static volatile uint8_t state;
+static uint8_t pressed[64];
+
+static const uint8_t usbCodes[] PROGMEM = {
+	// --------------------------------------------- Base ------------------------------------------
+	// 0x00 - 0x0F
+	0x00,
+	0x42, // F9
+	0x00,
+	0x3E, // F5
+
+	0x3C, // F3
+	0x3A, // F1
+	0x3B, // F2
+	0x45, // F12
+
+	0x00,
+	0x43, // F10
+	0x41, // F8
+	0x3F, // F6
+
+	0x3D, // F4
+	0x2B, // Tab
+	0x35, // `
+	0x00,
+
+
+	// 0x10 - 0x1F
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x48, // Pause/Break
+	0x14, // Q
+	0x1E, // 1
+	0x00,
+
+	0x00,
+	0x00,
+	0x1D, // Z
+	0x16, // S
+
+	0x04, // A
+	0x1A, // W
+	0x1F, // 2
+	0x00,
+
+
+	// 0x20 - 0x2F
+	0x00,
+	0x06, // C
+	0x1B, // X
+	0x07, // D
+
+	0x08, // E
+	0x21, // 4
+	0x20, // 3
+	0x00,
+
+	0x00,
+	0x2C, // Space
+	0x19, // V
+	0x09, // F
+
+	0x17, // T
+	0x15, // R
+	0x22, // 5
+	0x00,
+
+
+	// 0x30 - 0x3F
+	0x00,
+	0x11, // N
+	0x05, // B
+	0x0B, // H
+
+	0x0A, // G
+	0x1C, // Y
+	0x23, // 6
+	0x00,
+
+	0x00,
+	0x00,
+	0x10, // M
+	0x0D, // J
+
+	0x18, // U
+	0x24, // 7
+	0x25, // 8
+	0x00,
+
+
+	// 0x40 - 0x4F
+	0x00,
+	0x36, // ,
+	0x0E, // K
+	0x0C, // I
+
+	0x12, // O
+	0x27, // 0
+	0x26, // 9
+	0x00,
+
+	0x00,
+	0x37, // .
+	0x38, // /
+	0x0F, // L
+
+	0x33, // ;
+	0x13, // P
+	0x2D, // -
+	0x00,
+
+
+	// 0x50 - 0x5F
+	0x00,
+	0x00,
+	0x34, // '
+	0x00,
+
+	0x2F, // [
+	0x2E, // =
+	0x00,
+	0x00,
+
+	0x39, // Caps Lock
+	0x00,
+	0x28, // Return
+	0x30, // ]
+
+	0x00,
+	0x32, // #
+	0x00,
+	0x00,
+
+
+	// 0x60 - 0x6F
+	0x00,
+	0x64, // Backslash
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x2A, // Backspace
+	0x00,
+
+	0x00,
+	0x59, // Keypad "1"
+	0x00,
+	0x5C, // Keypad "4"
+
+	0x5F, // Keypad "7"
+	0x00,
+	0x00,
+	0x00,
+
+
+	// 0x70 - 0x7F
+	0x62, // Keypad "0/Ins"
+	0x63, // Keypad "."
+	0x5A, // Keypad "2"
+	0x5D, // Keypad "5"
+
+	0x5E, // Keypad "6"
+	0x60, // Keypad "8"
+	0x29, // Escape
+	0x53, // Num Lock
+
+	0x44, // F11
+	0x57, // Keypad "+"
+	0x5B, // Keypad "3"
+	0x56, // Keypad "-"
+
+	0x55, // Keypad "*"
+	0x61, // Keypad "9"
+	0x47, // Scroll Lock
+	0x00,
+
+
+	// 0x80 - 0x8F
+	0x00,
+	0x00,
+	0x00,
+	0x40, // F7
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+
+	// 0x90 - 0x9F
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+
+	// 0xA0 - 0xAF
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+
+	// 0xB0 - 0xBF
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+
+	// 0xC0 - 0xCF
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+
+	// 0xD0 - 0xDF
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+
+	// 0xE0 - 0xEF
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+
+	// 0xF0 - 0xFF
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+
+	// ------------------------------------------- Extended ----------------------------------------
+	// 0x00 - 0x0F
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+
+	// 0x10 - 0x1F
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+
+	// 0x20 - 0x2F
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+
+	// 0x30 - 0x3F
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+
+	// 0x40 - 0x4F
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x54, // Keypad "/"
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+
+	// 0x50 - 0x5F
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x58, // Keypad Enter
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+
+	// 0x60 - 0x6F
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x4D, // End
+	0x00,
+	0x50, // Left Arrow
+
+	0x4A, // Home
+	0x00,
+	0x00,
+	0x00,
+
+
+	// 0x70 - 0x7F
+	0x49, // Insert
+	0x4C, // Delete
+	0x51, // Down Arrow
+	0x00,
+
+	0x4F, // Right Arrow
+	0x52, // Up Arrow
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x4E, // Page Down
+	0x00,
+
+	0x46, // Print Screen
+	0x4B, // Page Up
+	0x00,
+	0x00,
+
+
+	// 0x80 - 0x8F
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+
+	// 0x90 - 0x9F
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+
+	// 0xA0 - 0xAF
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+
+	// 0xB0 - 0xBF
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+
+	// 0xC0 - 0xCF
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+
+	// 0xD0 - 0xDF
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+
+	// 0xE0 - 0xEF
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+
+	// 0xF0 - 0xFF
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00,
+
+	0x00,
+	0x00,
+	0x00,
+	0x00
+};
+
+uint8_t translateCode(uint16_t scanCode) {
+	return pgm_read_byte(&usbCodes[scanCode]);
+}
+
+int main(void) {
+	uint8_t i;
+
+	/* Disable watchdog if enabled by bootloader/fuses */
+	MCUSR &= ~(1 << WDRF);
+	wdt_disable();
+
+	/* Disable clock division */
+	clock_prescale_set(clock_div_1);
+
+	/* Hardware Initialization */
+	USB_Init();
+	EICRA = (1<<ISC01);   // interrupt on the falling edge
+	EICRB = 0x00;
+	EIMSK = (1<<INT0);
+	DDRD = 0x00;  // Port D inputs
+	PORTD = 0x00; // Fiddle DDRD for open collector outs
+	usartInit(38400);
+	usartSendFlashString(PSTR("NanduinoJTAG...\r"));
 	SetupHardware();
+	state = 0x00;
+	for ( i = 0; i < 32; i++ ) {
+		pressed[i] = 0x00;
+	}
 
 	LEDs_SetAllLEDs(LEDMASK_USB_NOTREADY);
 	sei();
@@ -71,21 +810,124 @@ int main(void)
 	}
 }
 
+void setPressed(uint8_t key, bool extended) {
+	if ( extended ) {
+		pressed[(key>>3) + 32] |= (1<<(key&7));
+	} else {
+		pressed[key>>3] |= (1<<(key&7));
+	}
+}
+
+void setReleased(uint8_t key, bool extended) {
+	if ( extended ) {
+		pressed[(key>>3) + 32] &= ~(1<<(key&7));
+	} else {
+		pressed[key>>3] &= ~(1<<(key&7));
+	}
+}
+
+bool isPressed(uint16_t key) {
+	return pressed[key>>3] & (1<<(key&7));
+}
+
+void gotScanCode(uint8_t scanCode) {
+	//uint16_t oldScanCode = 0x0000;
+	if ( scanCode == 0xE0 ) {
+		// This is an extended key code
+		state |= EXTENDED;
+	} else if ( scanCode == 0xF0 ) {
+		// A key has been released; the next byte will tell us which one.
+		state |= RELEASE;
+	} else {
+		// This code represents a keypress or release
+		if ( state & EXTENDED ) {
+			// Special cases in the extended range...
+			if ( scanCode == 0x12 ) {
+				// Print Screen generates two scan-codes, x12 and x7C. x12 appears to be some sort
+				// of special code because the arrow keys generate it when Num Lock is off. I'm
+				// choosing to ignore it.
+				state &= ~(EXTENDED|RELEASE);
+				return;
+			}
+		} else {
+			// Special cases in the base range
+			if ( (scanCode == 0x77) && isPressed(0x014) ) {
+				// Pause/Break generates two scan-codes, 14 and 77. Unfortunately, 77 is the proper
+				// code for Num Lock, so we should ignore any 77 events when 14 is pressed.
+				state &= ~(EXTENDED|RELEASE);
+				return;
+			}
+		}
+		DDRD |= 0x01;  // Drive clk low to tell keyboard to wait
+		state |= CHANGED;  // tell USB loop to send a report
+		if ( state & RELEASE ) {
+			// A key has been released
+			if ( state & EXTENDED ) {
+				// An extended key has been released
+				setReleased(scanCode, true);
+				usartSendByte('x');
+			} else {
+				// A regular key has been released
+				setReleased(scanCode, false);
+			}
+			usartSendByteHex(scanCode);
+			usartSendByte('R');
+			usartSendByte('\r');
+		} else {
+			// A key has been pressed
+			if ( state & EXTENDED ) {
+				// An extended key has been pressed
+				if ( !isPressed(scanCode + 256) ) {
+					setPressed(scanCode, true);
+					usartSendByte('x');
+					usartSendByteHex(scanCode);
+					usartSendByte('P');
+					usartSendByte('\r');
+				}
+			} else {
+				// A regular key has been pressed
+				if ( !isPressed(scanCode) ) {
+					setPressed(scanCode, false);
+					usartSendByteHex(scanCode);
+					usartSendByte('P');
+					usartSendByte('\r');
+				}
+			}
+		}
+		state &= ~(EXTENDED|RELEASE);
+	}
+}
+
+ISR(INT0_vect) {
+	static unsigned char data;
+	static uint8_t clk = 0;
+	static uint8_t parity;
+	if ( clk == 0 ) {
+		// Start bit - do nothing
+		parity = 0x02;
+	} else if ( clk >= 1 && clk <= 8 ) {
+		// Data bits - store
+		data >>= 1;
+		if ( PIND & 0x02 ) {
+			parity ^= 0x02;
+			data |= 0x80;
+		}
+	} else if ( clk == 9 ) {
+		// Parity bit - check it
+		if ( parity != (PIND & 0x02) ) {
+			usartSendByte('#');
+		}
+	} else if ( clk == 10 ) {
+		// Stop bit - print code
+		gotScanCode(data);
+		clk = 255;
+	}
+	clk++;
+}
+
 /** Configures the board hardware and chip peripherals for the demo's functionality. */
 void SetupHardware(void)
 {
-	/* Disable watchdog if enabled by bootloader/fuses */
-	MCUSR &= ~(1 << WDRF);
-	wdt_disable();
-
-	/* Disable clock division */
-	clock_prescale_set(clock_div_1);
-
-	/* Hardware Initialization */
-	Joystick_Init();
-	LEDs_Init();
-	USB_Init();
-	Buttons_Init();
 }
 
 /** Event handler for the USB_Connect event. This indicates that the device is enumerating via the status LEDs and
@@ -141,15 +983,9 @@ void EVENT_USB_Device_ControlRequest(void)
 		case HID_REQ_GetReport:
 			if (USB_ControlRequest.bmRequestType == (REQDIR_DEVICETOHOST | REQTYPE_CLASS | REQREC_INTERFACE))
 			{
-				USB_KeyboardReport_Data_t KeyboardReportData;
-
-				/* Create the next keyboard report for transmission to the host */
-				memset(&KeyboardReportData, 0, sizeof(USB_KeyboardReport_Data_t));
-
+				USB_KeyboardReport_Data_t thisReport = {0,};
 				Endpoint_ClearSETUP();
-
-				/* Write the report data to the control endpoint */
-				Endpoint_Write_Control_Stream_LE(&KeyboardReportData, sizeof(KeyboardReportData));
+				Endpoint_Write_Control_Stream_LE(&thisReport, sizeof(thisReport));
 				Endpoint_ClearOUT();
 			}
 
@@ -257,25 +1093,96 @@ void ProcessLEDReport(const uint8_t LEDReport)
 	LEDs_SetAllLEDs(LEDMask);
 }
 
-/** Sends the next HID report to the host, via the keyboard data endpoint. */
-void SendNextReport(void) {
-	static USB_KeyboardReport_Data_t prevReport = {0,};
-	Endpoint_SelectEndpoint(KEYBOARD_IN_EPNUM);
-	if ( Endpoint_IsReadWriteAllowed() ) {
-		uint8_t i = 0;
-		USB_KeyboardReport_Data_t thisReport = {0,};
-		if ( (PIND & 0x80) == 0x00 ) {
-			thisReport.KeyCode[i++] = HID_KEYBOARD_SC_F;
-		}
-
-		/* Check to see if the report data has changed - if so a report MUST be sent */
-		if ( memcmp(&prevReport, &thisReport, sizeof(USB_KeyboardReport_Data_t)) != 0 ) {
-			prevReport = thisReport;
-			Endpoint_Write_Stream_LE(&thisReport, sizeof(thisReport), NULL);
-			Endpoint_ClearIN();
+void composeReport(USB_KeyboardReport_Data_t *report) {
+	uint16_t i;
+	uint8_t j = 0;
+	uint8_t usbCode;
+	report->Modifier =
+		(isPressed(0x014) ? 0x01 : 0x00) |
+		(isPressed(0x012) ? 0x02 : 0x00) |
+		(isPressed(0x011) ? 0x04 : 0x00) |
+		(isPressed(0x11F) ? 0x08 : 0x00) |
+		(isPressed(0x114) ? 0x10 : 0x00) |
+		(isPressed(0x059) ? 0x20 : 0x00) |
+		(isPressed(0x111) ? 0x40 : 0x00) |
+		(isPressed(0x127) ? 0x80 : 0x00);
+	for ( i = 0; i < 512; i++ ) {
+		if ( isPressed(i) ) {
+			usbCode = translateCode(i);
+			if ( usbCode ) {
+				report->KeyCode[j++] = usbCode;
+				if ( j == 6 ) {
+					// No room for any more codes
+					return;
+				}
+			}
 		}
 	}
 }
+
+/** Sends the next HID report to the host, via the keyboard data endpoint. */
+void SendNextReport(void) {
+	//static USB_KeyboardReport_Data_t prevReport = {0,};
+	Endpoint_SelectEndpoint(KEYBOARD_IN_EPNUM);
+	if ( Endpoint_IsReadWriteAllowed() ) {
+		if ( state & CHANGED ) {
+			USB_KeyboardReport_Data_t thisReport = {0,};
+			state &= ~CHANGED;
+			composeReport(&thisReport);
+			Endpoint_Write_Stream_LE(&thisReport, sizeof(thisReport), NULL);
+			Endpoint_ClearIN();
+			DDRD &= 0xFE;  // Release clk: ready for more bytes from keyboard
+		}
+	}
+}
+
+/*		if ( (PIND & 0x80) == 0x00 ) {
+			thisReport.KeyCode[i++] = HID_KEYBOARD_SC_F;
+		}
+
+		if ( memcmp(&prevReport, &thisReport, sizeof(USB_KeyboardReport_Data_t)) != 0 ) {
+			prevReport = thisReport;
+			if ( i == 1 ) {
+				// Pressed
+				thisReport.Modifier = 0x10;  // Press rctrl
+				thisReport.KeyCode[0] = 0x00;
+				Endpoint_Write_Stream_LE(&thisReport, sizeof(thisReport), NULL);
+				Endpoint_ClearIN();
+
+				while ( !Endpoint_IsReadWriteAllowed() );
+				thisReport.Modifier = 0x00;  // Release rctrl
+				Endpoint_Write_Stream_LE(&thisReport, sizeof(thisReport), NULL);
+				Endpoint_ClearIN();
+
+				while ( !Endpoint_IsReadWriteAllowed() );
+				thisReport.Modifier = 0x05;  // Press lctrl
+				thisReport.KeyCode[0] = 0x4f;  // Press lalt
+				Endpoint_Write_Stream_LE(&thisReport, sizeof(thisReport), NULL);
+				Endpoint_ClearIN();
+
+				//while ( !Endpoint_IsReadWriteAllowed() );
+				//thisReport.KeyCode[2] = 0x4F;  // Press rarrow
+				//Endpoint_Write_Stream_LE(&thisReport, sizeof(thisReport), NULL);
+				//Endpoint_ClearIN();
+				usartSendByte('!');
+			} else {
+				// Released
+				thisReport.Modifier = 0x00;  // Release rarrow
+				thisReport.KeyCode[0] = 0x00;  // Release rarrow
+				Endpoint_Write_Stream_LE(&thisReport, sizeof(thisReport), NULL);
+				Endpoint_ClearIN();
+
+				//while ( !Endpoint_IsReadWriteAllowed() );
+				//thisReport.KeyCode[0] = 0x00;  // Release lctrl
+				//thisReport.KeyCode[1] = 0x00;  // Release lalt
+				//Endpoint_Write_Stream_LE(&thisReport, sizeof(thisReport), NULL);
+				//Endpoint_ClearIN();
+				usartSendByte('.');
+			}
+		}
+	}
+}
+*/
 
 /** Reads the next LED status report from the host from the LED data endpoint, if one has been sent. */
 void ReceiveNextReport(void)

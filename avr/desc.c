@@ -36,7 +36,7 @@
  *  the device's capabilities and functions.
  */
 
-#include "Descriptors.h"
+#include "desc.h"
 
 /** HID class report descriptor. This is a special descriptor constructed with values from the
  *  USBIF HID class specification to describe the reports and capabilities of the HID device. This

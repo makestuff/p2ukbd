@@ -1,44 +1,32 @@
-NeroJTAG is yet another protocol for a USB JTAG adaptor. On the host side there is a simple library
-"libnero", and a patch for Zoltán Csizmadia's excellent xilprg (programmer for Xilinx FPGAs), and a
-simple XSVF player. You can get the host stuff by downloading the Neopurgo package from here:
+A PS2->USB adapter with support for macros. The built-in macros allow you to push key events down to
+the host OS, even if you're in a VirtualBox guest. So right-menu + left-arrow or right-arrow allows
+you to switch between multiple full-screen desktops, each of which might have a VirtualBox guest
+running. You can also press right-menu + Fn to get F13-F24 keystrokes, which you can map in your
+host OS. See http://vimeo.com/makestuff/ps2usb for a quick demo.
 
-    https://github.com/makestuff/neopurgo
+I haven't implemented the keyboard LEDs. Maybe I'll do it one day, but to be honest I don't really
+miss the LEDs!
 
-On the device side, there are two implementations of the NeroJTAG protocol, one for the Cypress FX2
-chip (included in the Neopurgo package above) and one for the Atmel USB AVRs, included here. The
-firmware currently targets the AT90USB162. Change the Makefile if you have a different MCU.
-Suitable hardware platforms include the Nanduino, Teensy, Benito etc etc.
+BUILDING
 
-The project build assumes this directory ("neroJtag") lives within a structure like this:
+On Windows you'll need:
+  * WinAVR (http://winavr.sourceforge.net)
+  * Atmel FLIP (http://www.atmel.com/dyn/products/tools_card.asp?tool_id=3886)
 
-src
-|
-+-apps
-| |
-| +-neroJtag
-|
-+-libs
-|
-+-3rd
+On Linux you'll need:
+  * sudo apt-get install gcc-avr
+  * sudo apt-get install avr-libc
+  * sudo apt-get install dfu-programmer
 
-*** BUILDING ON WINDOWS ***
+Install MakeStuff build infrastructure (see http://bit.ly/makestuff):
+  curl -sL http://www.swaton.ukfsn.org/bin/makestuff-lindar-20110912.tar.gz | tar zxf -
 
-Prerequisites:
-   * http://winavr.sourceforge.net/
-   * http://www.atmel.com/dyn/resources/prod_documents/flip-2_4_6.zip
-   * http://www.java.com (FLIP needs this)
+Fetch p2ukbd and build:
+  cd makestuff/apps
+  ../common/msget.sh p2ukbd
+  cd p2ukbd/
+  make
 
-make clean
-make
-make -C avr flip
-
-*** BUILDING ON LINUX ***
-
-Prerequisites:
-   * sudo apt-get install gcc-avr
-   * sudo apt-get install avr-libc
-   * sudo apt-get install dfu-programmer
-
-make clean
-make
-sudo make -C avr dfu
+Flashing the firmware:
+  On Linux: sudo make dfu
+  On Windows: make flip

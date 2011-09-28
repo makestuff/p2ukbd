@@ -4,10 +4,10 @@
 #include <avr/wdt.h>
 #include <avr/power.h>
 #include <avr/interrupt.h>
-#include <util/delay.h>
+#include <util/delay_basic.h>
 #include <LUFA/Version.h>
 #include <LUFA/Drivers/USB/USB.h>
-#include <usart.h>
+//#include <usart.h>
 #include "keybitmap.h"
 #include "scancodes.h"
 #include "desc.h"
@@ -53,8 +53,9 @@ int main(void) {
 	EIMSK = (1<<INT0);    // ...of INT0 (PD0): the PS/2 clk
 	DDRD = 0x00;          // Port D is all inputs
 	PORTD = 0x00;         // Fiddle DDRD for open collector outs
-	usartInit(38400);
-	usartSendFlashString(PSTR("MakeStuff PS/2 to USB Adaptor...\r"));
+	//usartInit(38400);
+	//usartSendFlashString(PSTR("MakeStuff PS/2 to USB Adaptor...\r"));
+	bmInit();
 	state = 0x00;
 
 	sei();
@@ -115,50 +116,50 @@ static void processScanCode(uint8_t scanCode) {
 			}
 		}
 
-		// Tell the PS/2 keyboard to wait (until the USB loop has sent its report)
-		DDRD |= 0x01;  // Drive clk low to tell keyboard to wait
-
 		// Update the bitmap so we can keep track of what's pressed and what's not
 		if ( state & RELEASE ) {
 			// A key has been released
+			DDRD |= 0x01;  // Drive clk low to tell keyboard to wait
+			state |= CHANGED; // Tell USB loop to send a report
 			if ( state & EXTENDED ) {
 				// An extended key has been released
 				bmSetReleased(scanCode, true);
-				usartSendByte('x');
+				//usartSendByte('x');
 			} else {
 				// A regular key has been released
 				bmSetReleased(scanCode, false);
 			}
-			usartSendByteHex(scanCode);
-			usartSendByte('R');
-			usartSendByte('\r');
+			//usartSendByteHex(scanCode);
+			//usartSendByte('R');
+			//usartSendByte('\r');
 		} else {
 			// A key has been pressed
 			if ( state & EXTENDED ) {
 				// An extended key has been pressed
 				if ( !bmIsPressed(scanCode + 256) ) {
+					DDRD |= 0x01;  // Drive clk low to tell keyboard to wait
+					state |= CHANGED; // Tell USB loop to send a report
 					bmSetPressed(scanCode, true);
-					usartSendByte('x');
-					usartSendByteHex(scanCode);
-					usartSendByte('P');
-					usartSendByte('\r');
+					//usartSendByte('x');
+					//usartSendByteHex(scanCode);
+					//usartSendByte('P');
+					//usartSendByte('\r');
 				}
 			} else {
 				// A regular key has been pressed
 				if ( !bmIsPressed(scanCode) ) {
+					DDRD |= 0x01;  // Drive clk low to tell keyboard to wait
+					state |= CHANGED; // Tell USB loop to send a report
 					bmSetPressed(scanCode, false);
-					usartSendByteHex(scanCode);
-					usartSendByte('P');
-					usartSendByte('\r');
+					//usartSendByteHex(scanCode);
+					//usartSendByte('P');
+					//usartSendByte('\r');
 				}
 			}
 		}
 
 		// This was the last byte in this PS/2 event message, so clear the flags ready for the next
 		state &= ~(EXTENDED|RELEASE);
-
-		// Tell USB loop to send a report
-		state |= CHANGED;
 	}
 }
 
@@ -180,9 +181,9 @@ ISR(INT0_vect) {
 		}
 	} else if ( clk == 9 ) {
 		// Parity bit - check it
-		if ( parity != (PIND & 0x02) ) {
-			usartSendByte('#');
-		}
+		//if ( parity != (PIND & 0x02) ) {
+		//	usartSendByte('#');
+		//}
 	} else if ( clk == 10 ) {
 		// Stop bit - process code
 		processScanCode(data);
@@ -325,26 +326,27 @@ void EVENT_USB_Device_StartOfFrame(void) {
 
 // Compose a report to send to the host
 //
-static void composeReport(KeyboardReport *report) {
+static void handleRegularReport(void) {
+	KeyboardReport report = {0,};
 	uint16_t i;
 	uint8_t j = 0;
 	uint8_t usbCode;
-	report->Modifier =
-		(bmIsPressed(0x014) ? 0x01 : 0x00) |
-		(bmIsPressed(0x012) ? 0x02 : 0x00) |
-		(bmIsPressed(0x011) ? 0x04 : 0x00) |
-		(bmIsPressed(0x11F) ? 0x08 : 0x00) |
-		(bmIsPressed(0x114) ? 0x10 : 0x00) |
-		(bmIsPressed(0x059) ? 0x20 : 0x00) |
-		(bmIsPressed(0x111) ? 0x40 : 0x00) |
-		(bmIsPressed(0x127) ? 0x80 : 0x00);
+	report.Modifier =
+		(bmIsPressed(0x014) ? 0x01 : 0x00) |  // Left Ctrl
+		(bmIsPressed(0x012) ? 0x02 : 0x00) |  // Left Shift
+		(bmIsPressed(0x011) ? 0x04 : 0x00) |  // Left Alt
+		(bmIsPressed(0x11F) ? 0x08 : 0x00) |  // Left Windows Key
+		(bmIsPressed(0x114) ? 0x10 : 0x00) |  // Right Ctrl
+		(bmIsPressed(0x059) ? 0x20 : 0x00) |  // Right Shift
+		(bmIsPressed(0x111) ? 0x40 : 0x00) |  // Right Alt
+		(bmIsPressed(0x127) ? 0x80 : 0x00);   // Right Windows Key
 	for ( i = 0; i < 512; i++ ) {
 		// TODO: It would be more efficient to check the byte values first, rather than checking
 		//       each bit individually.
 		if ( bmIsPressed(i) ) {
 			usbCode = translateCode(i);
 			if ( usbCode ) {
-				report->KeyCode[j++] = usbCode;
+				report.KeyCode[j++] = usbCode;
 				if ( j == 6 ) {
 					// No room for any more codes
 					return;
@@ -352,72 +354,171 @@ static void composeReport(KeyboardReport *report) {
 			}
 		}
 	}
+	Endpoint_Write_Stream_LE(&report, sizeof(report), NULL);
+	Endpoint_ClearIN();
+}
+
+static const uint8_t specialKeys[] PROGMEM = {
+	0x6b, // Left arrow
+	0x01, // Extended range
+	0x05, // Left ctrl & alt
+	0x50, // Left arrow
+	0x00,
+	0x74, // Right arrow
+	0x01, // Extended range
+	0x05, // Left ctrl & alt
+	0x4f, // Left arrow
+	0x00,
+	0x05, // F1
+	0x00, // Base range
+	0x00, // No modifier
+	0x68, // F13
+	0x00,
+	0x06, // F2
+	0x00, // Base range
+	0x00, // No modifier
+	0x69, // F14
+	0x00,
+	0x04, // F3
+	0x00, // Base range
+	0x00, // No modifier
+	0x6a, // F15
+	0x00,
+	0x0c, // F4
+	0x00, // Base range
+	0x00, // No modifier
+	0x6b, // F16
+	0x00,
+	0x03, // F5
+	0x00, // Base range
+	0x00, // No modifier
+	0x6c, // F17
+	0x00,
+	0x0b, // F6
+	0x00, // Base range
+	0x00, // No modifier
+	0x6d, // F18
+	0x00,
+	0x83, // F7
+	0x00, // Base range
+	0x00, // No modifier
+	0x6e, // F19
+	0x00,
+	0x0a, // F8
+	0x00, // Base range
+	0x00, // No modifier
+	0x6f, // F20
+	0x00,
+	0x01, // F9
+	0x00, // Base range
+	0x00, // No modifier
+	0x70, // F21
+	0x00,
+	0x09, // F10
+	0x00, // Base range
+	0x00, // No modifier
+	0x71, // F22
+	0x00,
+	0x78, // F11
+	0x00, // Base range
+	0x00, // No modifier
+	0x72, // F23
+	0x00,
+	0x07, // F12
+	0x00, // Base range
+	0x00, // No modifier
+	0x73, // F24
+	0x00,
+	0x00  // End of list
+};
+
+static void handleSpecialReport(void) {
+	KeyboardReport report = {0,};
+	const uint8_t *p = specialKeys;
+	uint8_t byte = pgm_read_byte(p++);
+	while ( byte ) {
+		uint16_t scanCode = (pgm_read_byte(p++) << 8) + byte;
+		//usartSendWordHex(scanCode);
+		//usartSendByte('\r');
+		if ( bmIsPressed(scanCode) ) {
+			uint8_t i = 0;
+			//usartSendByte('%');
+
+			// Right-ctrl key down
+			report.Modifier = 0x10;  // Press rctrl
+			Endpoint_Write_Stream_LE(&report, sizeof(report), NULL);
+			Endpoint_ClearIN();
+
+			// Right-ctrl key up
+			while ( !Endpoint_IsReadWriteAllowed() );
+			report.Modifier = 0x00;  // Release rctrl
+			Endpoint_Write_Stream_LE(&report, sizeof(report), NULL);
+			Endpoint_ClearIN();
+
+			// Key macro down
+			while ( !Endpoint_IsReadWriteAllowed() );
+			report.Modifier = pgm_read_byte(p++);
+			byte = pgm_read_byte(p++);
+			while ( byte ) {
+				report.KeyCode[i++] = byte;
+				byte = pgm_read_byte(p++);
+			}
+			Endpoint_Write_Stream_LE(&report, sizeof(report), NULL);
+			Endpoint_ClearIN();
+
+			// Key macro up
+			while ( !Endpoint_IsReadWriteAllowed() );
+			report.Modifier = 0x00;
+			for ( i = 0; i < 6; i++ ) {
+				report.KeyCode[i] = 0x00;
+			}
+			Endpoint_Write_Stream_LE(&report, sizeof(report), NULL);
+			Endpoint_ClearIN();
+
+			// Right-ctrl key down
+			while ( !Endpoint_IsReadWriteAllowed() );
+			report.Modifier = 0x10;  // Press rctrl
+			Endpoint_Write_Stream_LE(&report, sizeof(report), NULL);
+			Endpoint_ClearIN();
+
+			// Right-ctrl key up
+			while ( !Endpoint_IsReadWriteAllowed() );
+			report.Modifier = 0x00;  // Release rctrl
+			Endpoint_Write_Stream_LE(&report, sizeof(report), NULL);
+			Endpoint_ClearIN();
+
+			return;  // Only send the first one found
+		} else {
+			p++;  // Skip over modifier
+			do {
+				byte = pgm_read_byte(p++);
+			} while ( byte );
+		}
+		byte = pgm_read_byte(p++);
+	}
+
+	// If we got this far then we found nothing, so send a blank report. This is so when a special
+	// key is released, the host is notified.
+	Endpoint_Write_Stream_LE(&report, sizeof(report), NULL);
+	Endpoint_ClearIN();
 }
 
 // Send a report to the host, if necessary
 //
 static void sendNextReport(void) {
-	//static KeyboardReport prevReport = {0,};
 	Endpoint_SelectEndpoint(KEYBOARD_IN_EPNUM);
 	if ( Endpoint_IsReadWriteAllowed() ) {
 		if ( state & CHANGED ) {
-			KeyboardReport thisReport = {0,};
 			state &= ~CHANGED;
-			composeReport(&thisReport);
-			Endpoint_Write_Stream_LE(&thisReport, sizeof(thisReport), NULL);
-			Endpoint_ClearIN();
+			if ( bmIsPressed(0x12f) ) {
+				handleSpecialReport();
+			} else {
+				handleRegularReport();
+			}
 			DDRD &= 0xFE;  // Release clk: ready for more bytes from keyboard
 		}
 	}
 }
-
-/*		if ( (PIND & 0x80) == 0x00 ) {
-			thisReport.KeyCode[i++] = HID_KEYBOARD_SC_F;
-		}
-
-		if ( memcmp(&prevReport, &thisReport, sizeof(KeyboardReport)) != 0 ) {
-			prevReport = thisReport;
-			if ( i == 1 ) {
-				// Pressed
-				thisReport.Modifier = 0x10;  // Press rctrl
-				thisReport.KeyCode[0] = 0x00;
-				Endpoint_Write_Stream_LE(&thisReport, sizeof(thisReport), NULL);
-				Endpoint_ClearIN();
-
-				while ( !Endpoint_IsReadWriteAllowed() );
-				thisReport.Modifier = 0x00;  // Release rctrl
-				Endpoint_Write_Stream_LE(&thisReport, sizeof(thisReport), NULL);
-				Endpoint_ClearIN();
-
-				while ( !Endpoint_IsReadWriteAllowed() );
-				thisReport.Modifier = 0x05;  // Press lctrl
-				thisReport.KeyCode[0] = 0x4f;  // Press lalt
-				Endpoint_Write_Stream_LE(&thisReport, sizeof(thisReport), NULL);
-				Endpoint_ClearIN();
-
-				//while ( !Endpoint_IsReadWriteAllowed() );
-				//thisReport.KeyCode[2] = 0x4F;  // Press rarrow
-				//Endpoint_Write_Stream_LE(&thisReport, sizeof(thisReport), NULL);
-				//Endpoint_ClearIN();
-				usartSendByte('!');
-			} else {
-				// Released
-				thisReport.Modifier = 0x00;  // Release rarrow
-				thisReport.KeyCode[0] = 0x00;  // Release rarrow
-				Endpoint_Write_Stream_LE(&thisReport, sizeof(thisReport), NULL);
-				Endpoint_ClearIN();
-
-				//while ( !Endpoint_IsReadWriteAllowed() );
-				//thisReport.KeyCode[0] = 0x00;  // Release lctrl
-				//thisReport.KeyCode[1] = 0x00;  // Release lalt
-				//Endpoint_Write_Stream_LE(&thisReport, sizeof(thisReport), NULL);
-				//Endpoint_ClearIN();
-				usartSendByte('.');
-			}
-		}
-	}
-}
-*/
 
 // Reads the next LED status report from the host from the LED data endpoint, if one has been sent.
 static void receiveNextReport(void) {

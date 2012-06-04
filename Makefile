@@ -59,7 +59,9 @@
 # To rebuild project do "make clean" then "make all".
 #----------------------------------------------------------------------------
 
-LUFA_VERSION=110528
+# The version of LUFA to download and use
+#LUFA_VERSION=110528
+LUFA_VERSION=120219
 
 # MCU name
 MCU = at90usb162
@@ -120,6 +122,9 @@ OBJDIR = .
 # Path to the LUFA library
 LUFA_PATH = LUFA-$(LUFA_VERSION)
 
+# Path to top level
+TOP := ../..
+
 
 # LUFA library compile-time options and predefined tokens
 LUFA_OPTS  = -D USB_DEVICE_ONLY
@@ -156,7 +161,7 @@ ASRC =
 # Optimization level, can be [0, 1, 2, 3, s]. 
 #     0 = turn off optimization. s = optimize for size.
 #     (Note: 3 is not always the best optimization level. See avr-libc FAQ.)
-OPT = s
+OPT = 2
 
 
 # Debugging format.
@@ -170,7 +175,7 @@ DEBUG = dwarf-2
 #     Each directory must be seperated by a space.
 #     Use forward slashes for directory separators.
 #     For a directory that has spaces, enclose it in quotes.
-EXTRAINCDIRS = $(LUFA_PATH) ../../common ../../libs/avrutil
+EXTRAINCDIRS = $(LUFA_PATH) $(TOP)/common $(TOP)/libs/avrutil
 
 
 # Compiler flag to set the C Standard level.
@@ -331,7 +336,7 @@ LDFLAGS += -Wl,--relax
 LDFLAGS += -Wl,--gc-sections
 LDFLAGS += $(EXTMEMOPTS)
 LDFLAGS += $(patsubst %,-L%,$(EXTRALIBDIRS))
-LDFLAGS += $(PRINTF_LIB) $(SCANF_LIB) $(MATH_LIB) ../../libs/avrutil/lib/avr/$(MCU)/avrutil.a
+LDFLAGS += $(PRINTF_LIB) $(SCANF_LIB) $(MATH_LIB) $(TOP)/libs/avrutil/lib/avr/$(MCU)/avrutil.a
 #LDFLAGS += -T linker_script.x
 
 
@@ -464,7 +469,7 @@ ALL_ASFLAGS = -mmcu=$(MCU) -I. -x assembler-with-cpp $(ASFLAGS)
 
 
 # Default target.
-all: ../../libs/avrutil/lib/avr/$(MCU)/avrutil.a LUFA-$(LUFA_VERSION) begin gccversion sizebefore build sizeafter end
+all: $(TOP)/libs/avrutil/lib/avr/$(MCU)/avrutil.a LUFA-$(LUFA_VERSION) begin gccversion sizebefore build sizeafter end
 
 # Change the build target to build a HEX file or a library.
 build: elf hex eep lss sym
@@ -718,22 +723,22 @@ build elf hex eep lss sym coff extcoff doxygen clean          \
 clean_list clean_doxygen program dfu flip flip-ee dfu-ee      \
 debug gdb-config
 
-$(LUFA_PATH)/LUFA/makefile LUFA-$(LUFA_VERSION): ../../3rd/LUFA-$(LUFA_VERSION)
+$(LUFA_PATH)/LUFA/makefile LUFA-$(LUFA_VERSION): $(TOP)/3rd/LUFA-$(LUFA_VERSION)
 	mkdir -p LUFA-$(LUFA_VERSION)
-	cp -r ../../3rd/LUFA-$(LUFA_VERSION)/LUFA LUFA-$(LUFA_VERSION)
+	cp -r $(TOP)/3rd/LUFA-$(LUFA_VERSION)/LUFA LUFA-$(LUFA_VERSION)
 
-../../3rd/LUFA-$(LUFA_VERSION):
+$(TOP)/3rd/LUFA-$(LUFA_VERSION):
 	wget -O lufa.zip --no-check-certificate http://www.fourwalledcubicle.com/files/LUFA/LUFA-$(LUFA_VERSION).zip
 	unzip lufa.zip
-	mkdir -p ../../3rd
+	mkdir -p $(TOP)/3rd
 	rm lufa.zip
-	mv "LUFA-$(LUFA_VERSION)" ../../3rd/LUFA-$(LUFA_VERSION)
+	mv "LUFA-$(LUFA_VERSION)" $(TOP)/3rd/LUFA-$(LUFA_VERSION)
 
-../../libs/avrutil:
+$(TOP)/libs/avrutil:
 	wget --no-check-certificate -O avrutil.tar.gz https://github.com/makestuff/avrutil/tarball/master
 	tar zxf avrutil.tar.gz
 	mv makestuff-avrutil-* $@
 	rm -f avrutil.tar.gz
 
-../../libs/avrutil/lib/avr/$(MCU)/avrutil.a: ../../libs/avrutil
-	make -C ../../libs/avrutil
+$(TOP)/libs/avrutil/lib/avr/$(MCU)/avrutil.a: $(TOP)/libs/avrutil
+	make -C $(TOP)/libs/avrutil

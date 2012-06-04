@@ -1,13 +1,16 @@
-A PS2->USB adapter with support for macros. Based heavily on the LowLevel/Keyboard demo from LUFA.
+A PS2->USB adapter with support for macros. Based heavily on the
+LowLevel/Keyboard demo from LUFA.
 
-The built-in macros allow you to push key events down to the host OS, even if you're in a VirtualBox
-guest. So right-menu + left-arrow or right-arrow allows you to switch between multiple full-screen
-desktops, each of which might have a VirtualBox guest running. You can also press right-menu + Fn to
-get F13-F24 keystrokes, which you can map in your host OS. See http://vimeo.com/makestuff/ps2usb for
-a quick demo.
+The built-in macros allow you to push key events down to the host OS, even if
+you're in a VirtualBox guest. So right-menu + left-arrow or right-arrow allows
+you to switch between multiple full-screen desktops, each of which might have a
+VirtualBox guest running. You can also press right-menu + Fn to get F13-F24
+keystrokes, which you can map in your host OS. See here for a quick demo:
 
-I haven't implemented the keyboard LEDs. Maybe I'll do it one day, but to be honest I don't really
-miss the LEDs!
+  http://vimeo.com/makestuff/ps2usb
+
+I haven't implemented the keyboard LEDs. Maybe I'll do it one day, but to be
+honest I don't really miss the LEDs!
 
 BUILDING
 
